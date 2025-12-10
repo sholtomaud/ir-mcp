@@ -50,6 +50,11 @@ async def handle_list_tools() -> list[Tool]:
                 },
                 "required": ["primary_currency", "secondary_currency"]
             }
+        ),
+        Tool(
+            name="get_my_balance",
+            description="Gets the current balance for all currencies in your account.",
+            inputSchema={}
         )
     ]
 
@@ -83,18 +88,33 @@ def _format_recent_trades_data(data: dict) -> str:
     formatted_trades = "\n".join([f"  - Price: {trade['Price']}, Volume: {trade['Volume']}" for trade in trades])
     return f"Recent Trades for {data['PrimaryCurrencyCode']}/{data['SecondaryCurrencyCode']}:\n{formatted_trades}"
 
+def _format_balance_data(data: dict) -> str:
+    """Formats balance data into a human-readable string."""
+    if not data:
+        return "No balance information available."
+
+    formatted_balances = "\n".join(
+        [f"  - {bal['CurrencyCode']}: Total: {bal.get('TotalBalance', 'N/A')}, Available: {bal.get('AvailableBalance', 'N/A')}"
+         for bal in data.values()]
+    )
+    return f"Your Balances:\n{formatted_balances}"
+
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handles a tool call from the AI."""
     primary_currency = arguments.get("primary_currency")
     secondary_currency = arguments.get("secondary_currency")
 
-    if not primary_currency or not secondary_currency:
+    if name not in ["get_my_balance"] and (not primary_currency or not secondary_currency):
         return [TextContent(type="text", text="Missing primary or secondary currency.")]
+
+    if not ir_client.websocket or not ir_client.websocket.open:
+        return [TextContent(type="text", text="WebSocket is not connected. Please wait a moment and try again.")]
 
     try:
         if name == "get_ticker":
             await ir_client.subscribe_ticker(primary_currency, secondary_currency)
+            await asyncio.sleep(1) # Give time for data to arrive
             data = ir_client.get_latest_ticker(primary_currency, secondary_currency)
             if not data:
                 return [TextContent(type="text", text=f"Data for {primary_currency}/{secondary_currency} is not available yet. Please try again in a moment.")]
@@ -102,6 +122,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "get_order_book":
             await ir_client.subscribe_order_book(primary_currency, secondary_currency)
+            await asyncio.sleep(1) # Give time for data to arrive
             data = ir_client.get_latest_order_book(primary_currency, secondary_currency)
             if not data:
                 return [TextContent(type="text", text=f"Data for {primary_currency}/{secondary_currency} is not available yet. Please try again in a moment.")]
@@ -109,21 +130,29 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "get_recent_trades":
             await ir_client.subscribe_recent_trades(primary_currency, secondary_currency)
+            await asyncio.sleep(1) # Give time for data to arrive
             data = ir_client.get_latest_recent_trades(primary_currency, secondary_currency)
             if not data:
                 return [TextContent(type="text", text=f"Data for {primary_currency}/{secondary_currency} is not available yet. Please try again in a moment.")]
             return [TextContent(type="text", text=_format_recent_trades_data(data))]
 
+        elif name == "get_my_balance":
+            await ir_client.subscribe_balance()
+            await asyncio.sleep(1) # Give time for data to arrive
+            data = ir_client.get_my_balance()
+            if not data:
+                return [TextContent(type="text", text="Balance data is not available yet. Please try again in a moment.")]
+            return [TextContent(type="text", text=_format_balance_data(data))]
         else:
             logging.error(f"Unknown tool: {name}")
             return [TextContent(type="text", text="Unknown tool.")]
 
-    except KeyError as e:
-        logging.error(f"Invalid currency pair: {primary_currency}/{secondary_currency} - {e}")
-        return [TextContent(type="text", text=f"Invalid currency pair: {primary_currency}/{secondary_currency}")]
+    except KeyError:
+        logging.error(f"Invalid currency pair: {primary_currency}/{secondary_currency}")
+        return [TextContent(type="text", text=f"Invalid currency pair: {primary_currency}/{secondary_currency}. Please check the currency codes and try again.")]
     except Exception as e:
         logging.error(f"An error occurred while calling {name}: {e}")
-        return [TextContent(type="text", text=f"An unexpected error occurred.")]
+        return [TextContent(type="text", text=f"An unexpected error occurred: {e}")]
 
 
 async def main():
