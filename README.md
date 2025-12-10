@@ -1,7 +1,7 @@
 # Independent Reserve MCP Server
 
 This Model Context Protocol (MCP) server provides real-time cryptocurrency data from the Independent Reserve exchange to AI assistants. It allows you to ask questions about cryptocurrency prices and market data.
-> test
+> test hkjh
 ## Features
 
 - **Real-time Ticker Data**: Get the latest price, bid, ask, and volume for any currency pair.
